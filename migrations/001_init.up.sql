@@ -52,9 +52,9 @@ CREATE TABLE temp_addresses (
 -- Таблица для хранения писем, связанная с временным адресом
 CREATE TABLE emails (
     id SERIAL PRIMARY KEY,
-    address_id INTEGER NOT NULL REFERENCES temp_addresses(id) ON DELETE CASCADE,
+    address_id INTEGER NOT NULL REFERENCES temp_addresses (id) ON DELETE CASCADE,
     sender VARCHAR(255) NOT NULL,
-    recipients TEXT[] NOT NULL,
+    recipients TEXT [] NOT NULL,
     subject TEXT,
     body TEXT,
     raw_data BYTEA,
@@ -62,4 +62,45 @@ CREATE TABLE emails (
 );
 
 -- Индекс для быстрого поиска писем по адресу
-CREATE INDEX idx_emails_address_id ON emails(address_id);
+CREATE INDEX idx_emails_address_id ON emails (address_id);
+
+--Anemone Trello
+-- Таблица для досок (boards)
+CREATE TABLE boards (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(), 
+    title      VARCHAR(255) NOT NULL,
+    user_id    INT NOT NULL REFERENCES users (id) ON DELETE CASCADE, 
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Индекс для быстрого поиска досок по пользователю
+CREATE INDEX idx_boards_user_id ON boards (user_id);
+
+-- Таблица для колонок (columns)
+CREATE TABLE columns (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    column_title  VARCHAR(255) NOT NULL,
+    board_id      UUID NOT NULL,
+    position      INTEGER NOT NULL,
+
+FOREIGN KEY (board_id) REFERENCES boards (id) ON DELETE CASCADE,
+
+UNIQUE (board_id, position) );
+
+-- Индекс для быстрого поиска колонок по доске
+CREATE INDEX idx_columns_board_id ON columns (board_id);
+
+-- Таблица для карточек (cards)
+CREATE TABLE cards (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    content       TEXT NOT NULL,
+    column_id     UUID NOT NULL,
+    position      INTEGER NOT NULL,
+
+FOREIGN KEY (column_id) REFERENCES columns (id) ON DELETE CASCADE,
+
+UNIQUE (column_id, position) );
+
+-- Индекс для быстрого поиска карточек по колонке
+CREATE INDEX idx_cards_column_id ON cards (column_id);

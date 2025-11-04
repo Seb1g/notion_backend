@@ -4,3 +4,6 @@ DROP TABLE IF EXISTS notes_folder;
 DROP TABLE IF EXISTS refresh_tokens;
 DROP TABLE IF EXISTS temp_addresses;
 DROP TABLE IF EXISTS emails;
+DROP TABLE IF EXISTS boards;
+DROP TABLE IF EXISTS columns;
+DROP TABLE IF EXISTS card;
