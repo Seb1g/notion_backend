@@ -38,41 +38,51 @@ type BoardHandler struct {
 	AuthService *auth_services.AuthService
 }
 
+func (h *BoardHandler) getBoardRepoInterface() middlewares.BoardRepoInterface {
+	return h.Service.Repo
+}
+
 func NewBoardHandler(s *trello_services.BoardService, a *auth_services.AuthService) *BoardHandler {
 	return &BoardHandler{Service: s, AuthService: a}
 }
 
 func (h *BoardHandler) BoardRoutes(r *mux.Router) {
-	// Create Kanban Board: Status: WORK
+	boardRepo := h.getBoardRepoInterface()
+	// Work
 	r.Handle("/api/v1/trello/create_board",
 		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.createBoard)),
 	).Methods("POST")
-	// Get one Kanban Board: Status: WORK
-	r.Handle("/api/v1/trello/get_one_user_board",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.getOneUserBoard)),
-	).Methods("GET")
-	// Get all User Boards: Status: WORK
+	// Work
 	r.Handle("/api/v1/trello/get_all_user_boards",
 		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.getAllUserBoards)),
 	).Methods("GET")
-	// Delete Kanban Board: Status: WORK
-	r.Handle("/api/v1/trello/delete_board",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.deleteBoard)),
+
+	boardRouter := r.PathPrefix("/api/v1/trello/board/{boardID}").Subrouter()
+	// Work
+	boardRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.getOneUserBoard))),
+	).Methods("GET")
+	// Work
+	boardRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.deleteBoard))),
 	).Methods("DELETE")
-	// Rename Kanban Board: Status: 
-	r.Handle("/api/v1/trello/rename_board",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.renameBoard)),
+	// Work
+	boardRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.renameBoard))),
 	).Methods("PUT")
-	// Update KanBan Board: Status: UNKNOWN
-	r.Handle("/api/v1/trello/update_board",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.updateBoard)),
+	// WORK
+	boardRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.updateBoard))),
 	).Methods("POST")
 }
 
 func (h *BoardHandler) createBoard(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title  string `json:"title"`
-		UserID int `json:"user_id"`
+		Title string `json:"title"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -81,7 +91,13 @@ func (h *BoardHandler) createBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	boardData, err := h.Service.CreateBoard(r.Context(), req.Title, req.UserID)
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "User authentication data missing", http.StatusInternalServerError)
+		return
+	}
+
+	boardData, err := h.Service.CreateBoard(r.Context(), req.Title, userID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -92,11 +108,10 @@ func (h *BoardHandler) createBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BoardHandler) getOneUserBoard(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	boardID := query.Get("boardId")
-	userID := query.Get("userId")
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
 
-	oneUserBoard, err := h.Service.GetOneUserBoard(r.Context(), boardID, userID)
+	oneUserBoard, err := h.Service.GetOneUserBoard(r.Context(), boardID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -107,7 +122,11 @@ func (h *BoardHandler) getOneUserBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BoardHandler) getAllUserBoards(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("userId")
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "User authentication data missing", http.StatusInternalServerError)
+		return
+	}
 
 	allUserBoards, err := h.Service.GetAllUserBoards(r.Context(), userID)
 	if err != nil {
@@ -120,18 +139,10 @@ func (h *BoardHandler) getAllUserBoards(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *BoardHandler) deleteBoard(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		BoardID string `json:"board_id"`
-		UserID  int `json:"user_id"`
-	}
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handleError(w, err)
-		return
-	}
-	defer r.Body.Close()
-
-	err := h.Service.DeleteBoard(r.Context(), req.BoardID, req.UserID)
+	err := h.Service.DeleteBoard(r.Context(), boardID)
 	if err != nil {
 		if errors.Is(err, trello_repository.ErrBoardNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -148,8 +159,6 @@ func (h *BoardHandler) deleteBoard(w http.ResponseWriter, r *http.Request) {
 
 func (h *BoardHandler) renameBoard(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BoardID string `json:"board_id"`
-		UserID  int `json:"user_id"`
 		NewName string `json:"new_name"`
 	}
 
@@ -159,7 +168,10 @@ func (h *BoardHandler) renameBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	board, err := h.Service.RenameBoard(r.Context(), req.BoardID, req.UserID, req.NewName)
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+
+	board, err := h.Service.RenameBoard(r.Context(), boardID, req.NewName)
 	if err != nil {
 		if errors.Is(err, trello_repository.ErrBoardNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -176,9 +188,7 @@ func (h *BoardHandler) renameBoard(w http.ResponseWriter, r *http.Request) {
 
 func (h *BoardHandler) updateBoard(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BoardID   string                 `json:"board_id"`
 		BoardData []*trello_model.Column `json:"board_data"`
-		UserID    int                 `json:"user_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -187,7 +197,16 @@ func (h *BoardHandler) updateBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	err := h.Service.UpdateBoard(r.Context(), req.BoardID, req.UserID, req.BoardData)
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "User authentication data missing", http.StatusInternalServerError)
+		return
+	}
+
+	err := h.Service.UpdateBoard(r.Context(), boardID, userID, req.BoardData)
 	if err != nil {
 		if errors.Is(err, trello_repository.ErrBoardNotFound) {
 			w.WriteHeader(http.StatusNotFound)

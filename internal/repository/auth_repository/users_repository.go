@@ -40,7 +40,6 @@ func(r *UserRepo) GetByID(ctx context.Context, id float64) (*auth_model.User, er
 	return &u, nil
 }
 
-// Изменено: теперь принимает userID, а не email (лучше использовать ID).
 func (r *UserRepo) UpdatePassword(ctx context.Context, userID int, newHash string) error {
 	q := `UPDATE users SET password=$1 WHERE id=$2`
 	_, err := r.DB.ExecContext(ctx, q, newHash, userID)

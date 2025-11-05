@@ -26,7 +26,6 @@ func (h *AuthHandler) RegisterRoutes(r *mux.Router) {
 }
 
 func (h *AuthHandler) register(w http.ResponseWriter, r *http.Request) {
-	// ... (почти без изменений, но Service теперь сам триммит)
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -50,7 +49,6 @@ func (h *AuthHandler) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
-	// ... (почти без изменений, но Service теперь сам триммит)
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -74,7 +72,6 @@ func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 🆕 НОВЫЙ МАРШРУТ: Смена пароля
 func (h *AuthHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email       string `json:"email"`
@@ -87,10 +84,9 @@ func (h *AuthHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	if err := h.Service.ChangePassword(r.Context(), req.Email, req.OldPassword, req.NewPassword); err != nil {
-		// Стараемся не раскрывать слишком много информации об ошибке
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "invalid old password") || strings.Contains(err.Error(), "user not found") {
-			status = http.StatusUnauthorized // Лучше использовать 401 для "неправильный старый пароль"
+			status = http.StatusUnauthorized
 			http.Error(w, "Invalid email or old password", status)
 			return
 		}
@@ -118,7 +114,6 @@ func (h *AuthHandler) refresh(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"access_token": newAccess, "user_data": user_data})
 }
 
-// 🆕 НОВЫЙ МАРШРУТ: Logout
 func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
@@ -128,7 +123,6 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Удаление refresh-токена
 	if err := h.Service.Logout(r.Context(), req.RefreshToken); err != nil {
 		http.Error(w, "Failed to logout", http.StatusInternalServerError)
 		return

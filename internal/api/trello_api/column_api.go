@@ -15,30 +15,44 @@ import (
 type ColumnHandler struct {
 	Service     *trello_services.ColumnService
 	AuthService *auth_services.AuthService
+	BoardRepo   middlewares.BoardRepoInterface
 }
 
-func NewColumnHandler(s *trello_services.ColumnService, a *auth_services.AuthService) *ColumnHandler {
-	return &ColumnHandler{Service: s, AuthService: a}
+func NewColumnHandler(s *trello_services.ColumnService, a *auth_services.AuthService, br middlewares.BoardRepoInterface) *ColumnHandler {
+	return &ColumnHandler{Service: s, AuthService: a, BoardRepo: br}
+}
+
+func (h *ColumnHandler) getBoardRepoInterface() middlewares.BoardRepoInterface {
+	return h.BoardRepo
 }
 
 func (h *ColumnHandler) ColumnRoutes(r *mux.Router) {
-	// Create Column in Board: Status: WORK
-	r.Handle("/api/v1/trello/create_column",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.createColumn)),
+	boardRepo := h.getBoardRepoInterface()
+
+	// WORK
+	r.Handle("/api/v1/trello/board/{boardID}/column",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.createColumn))),
 	).Methods("POST")
-	// Delete Column from Board: Status: WORK
-	r.Handle("/api/v1/trello/delete_column",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.deleteColumn)),
+
+	columnRouter := r.PathPrefix("/api/v1/trello/board/{boardID}/column/{columnID}").Subrouter()
+	// WORK
+	columnRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.deleteColumn))),
 	).Methods("DELETE")
-	// Rename Column in Board: Status: WORK
-	r.Handle("/api/v1/trello/rename_column",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.renameColumn)),
+	// WORK
+	columnRouter.Handle("",
+		middlewares.AuthMiddleware(h.AuthService,
+			middlewares.IsBoardOwner_Path(boardRepo, http.HandlerFunc(h.renameColumn))),
 	).Methods("PUT")
 }
 
 func (h *ColumnHandler) createColumn(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+
 	var req struct {
-		BoardID     string `json:"board_id"`
 		ColumnTitle string `json:"column_title"`
 	}
 
@@ -48,7 +62,7 @@ func (h *ColumnHandler) createColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	columnData, err := h.Service.CreateColumn(r.Context(), req.BoardID, req.ColumnTitle)
+	columnData, err := h.Service.CreateColumn(r.Context(), boardID, req.ColumnTitle)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -59,18 +73,11 @@ func (h *ColumnHandler) createColumn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ColumnHandler) deleteColumn(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		BoardID  string `json:"board_id"`
-		ColumnID string `json:"column_id"`
-	}
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+	columnID := vars["columnID"]
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handleError(w, err)
-		return
-	}
-	defer r.Body.Close()
-
-	err := h.Service.DeleteColumn(r.Context(), req.BoardID, req.ColumnID)
+	err := h.Service.DeleteColumn(r.Context(), boardID, columnID)
 	if err != nil {
 		if errors.Is(err, trello_repository.ErrColumnNotFound) {
 			w.WriteHeader(http.StatusNotFound)
@@ -86,10 +93,12 @@ func (h *ColumnHandler) deleteColumn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ColumnHandler) renameColumn(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+	columnID := vars["columnID"]
+
 	var req struct {
-		BoardID  string `json:"board_id"`
-		ColumnID string `json:"column_id"`
-		NewName  string `json:"new_name"`
+		NewName string `json:"new_name"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -98,7 +107,7 @@ func (h *ColumnHandler) renameColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	column, err := h.Service.RenameColumn(r.Context(), req.BoardID, req.ColumnID, req.NewName)
+	column, err := h.Service.RenameColumn(r.Context(), boardID, columnID, req.NewName)
 	if err != nil {
 		if errors.Is(err, trello_repository.ErrColumnNotFound) {
 			w.WriteHeader(http.StatusNotFound)

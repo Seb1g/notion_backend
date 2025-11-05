@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"anemone_notes/internal/api"
 	"anemone_notes/internal/api/middlewares"
 	"anemone_notes/internal/services/auth_services"
 	"anemone_notes/internal/services/notes_services"
@@ -89,8 +88,6 @@ func (h *PageHandler) PagesRoutes(r *mux.Router) {
 	r.Handle("/api/v1/notes/trash/clear/{id}",
 		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.deleteAllMarkNotes)),
 	).Methods("DELETE")
-	// TODO: DELETE THIS ENDPOINT
-	r.HandleFunc("/api/v1/notes/health", api.HealthCheckHandler).Methods("GET")
 }
 
 func (h *PageHandler) createPage(w http.ResponseWriter, r *http.Request) {

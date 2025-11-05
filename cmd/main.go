@@ -80,12 +80,12 @@ func main() {
 	// TRELLO COLUMN
 	columnRepo := trello_repository.NewColumnRepo(db)
 	columnService := trello_services.NewColumnService(columnRepo)
-	columnHandler := trello_api.NewColumnHandler(columnService, authSvc)
+	columnHandler := trello_api.NewColumnHandler(columnService, authSvc, boardRepo)
 
 	// TRELLO CARD
 	cardRepo := trello_repository.NewCardRepo(db)
 	cardService := trello_services.NewCardService(cardRepo)
-	cardHandler := trello_api.NewCardHandler(cardService, authSvc)
+	cardHandler := trello_api.NewCardHandler(cardService, authSvc, boardRepo)
 
 	r := mux.NewRouter()
 

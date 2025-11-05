@@ -37,7 +37,6 @@ func (r *BoardRepo) CreateBoard(ctx context.Context, title string, userID int) (
 	boardID := uuid.New().String()
 	board := &trello_model.Board{ID: boardID, Title: title, UserID: userID}
 
-	// 1. Создание доски
 	qBoard := `INSERT INTO boards (id, title, user_id) VALUES ($1, $2, $3) RETURNING *;`
 	err = tx.QueryRowxContext(ctx, qBoard, boardID, title, userID).StructScan(board)
 	if err != nil {
@@ -78,9 +77,9 @@ func (r *BoardRepo) CreateBoard(ctx context.Context, title string, userID int) (
 	return board, nil
 }
 
-func (r *BoardRepo) GetOneUserBoard(ctx context.Context, boardID, userID string) (*trello_model.BoardWithColumns, error) {
+func (r *BoardRepo) GetOneUserBoard(ctx context.Context, boardID string) (*trello_model.BoardWithColumns, error) {
 	var board trello_model.Board
-	err := r.DB.GetContext(ctx, &board, "SELECT * FROM boards WHERE id = $1 AND user_id = $2", boardID, userID)
+	err := r.DB.GetContext(ctx, &board, "SELECT * FROM boards WHERE id = $1", boardID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrBoardNotFound
@@ -128,8 +127,9 @@ func (r *BoardRepo) GetOneUserBoard(ctx context.Context, boardID, userID string)
 	}, nil
 }
 
-func (r *BoardRepo) GetAllUserBoards(ctx context.Context, userID string) ([]*trello_model.Board, error) {
+func (r *BoardRepo) GetAllUserBoards(ctx context.Context, userID int) ([]*trello_model.Board, error) {
 	var boards []*trello_model.Board
+
 	q := `SELECT * FROM boards WHERE user_id = $1;`
 	err := r.DB.SelectContext(ctx, &boards, q, userID)
 	if err != nil {
@@ -138,9 +138,9 @@ func (r *BoardRepo) GetAllUserBoards(ctx context.Context, userID string) ([]*tre
 	return boards, nil
 }
 
-func (r *BoardRepo) DeleteBoard(ctx context.Context, boardID string, userID int) error {
-	q := `DELETE FROM boards WHERE id = $1 AND user_id = $2 RETURNING id;`
-	result, err := r.DB.ExecContext(ctx, q, boardID, userID)
+func (r *BoardRepo) DeleteBoard(ctx context.Context, boardID string) error {
+	q := `DELETE FROM boards WHERE id = $1 RETURNING id;`
+	result, err := r.DB.ExecContext(ctx, q, boardID)
 	if err != nil {
 		return err
 	}
@@ -156,10 +156,11 @@ func (r *BoardRepo) DeleteBoard(ctx context.Context, boardID string, userID int)
 	return nil
 }
 
-func (r *BoardRepo) RenameBoard(ctx context.Context, boardID string, userID int, newName string) (*trello_model.Board, error) {
-	q := `UPDATE boards SET title = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3 RETURNING *;`
+func (r *BoardRepo) RenameBoard(ctx context.Context, boardID string, newName string) (*trello_model.Board, error) {
+	q := `UPDATE boards SET title = $1, updated_at = NOW() WHERE id = $2 RETURNING *;`
 	var board trello_model.Board
-	err := r.DB.QueryRowxContext(ctx, q, newName, boardID, userID).StructScan(&board)
+
+	err := r.DB.QueryRowxContext(ctx, q, newName, boardID).StructScan(&board)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrBoardNotFound
@@ -174,23 +175,13 @@ func (r *BoardRepo) UpdateBoard(ctx context.Context, boardID string, userID int,
 	if err != nil {
 		return fmt.Errorf("could not start transaction: %w", err)
 	}
-	// Гарантируем откат
+
 	defer func() {
-		if r := recover(); r != nil || err != nil {
+		if err != nil {
 			_ = tx.Rollback()
-			if r != nil {
-				panic(r)
-			}
 		}
 	}()
 
-	// 1. Проверка владения
-	// ... (код проверки) ...
-
-	// --- 🔑 ФИНАЛЬНАЯ СТРАТЕГИЯ: Полная очистка и вставка ---
-
-	// 2. Очистка старых данных (DELETE)
-	// Удаляем все карточки, привязанные к этой доске
 	_, err = tx.ExecContext(ctx, `
         DELETE FROM cards 
         WHERE column_id IN (SELECT id FROM columns WHERE board_id = $1);
@@ -199,17 +190,13 @@ func (r *BoardRepo) UpdateBoard(ctx context.Context, boardID string, userID int,
 		return fmt.Errorf("%w: failed to delete old cards: %v", ErrBoardUpdateFailed, err)
 	}
 
-	// Удаляем все колонки, привязанные к этой доске
 	_, err = tx.ExecContext(ctx, "DELETE FROM columns WHERE board_id = $1", boardID)
 	if err != nil {
 		return fmt.Errorf("%w: failed to delete old columns: %v", ErrBoardUpdateFailed, err)
 	}
 
-	// 3. Вставка новых данных (INSERT)
 	for i, col := range boardData {
-		// 🔑 Вставка колонки
 		var columnID string
-		// ⚠️ Используем ID из пейлоада для сохранения ссылочной целостности и UUID
 		err = tx.GetContext(ctx, &columnID, `
             INSERT INTO columns (id, board_id, column_title, position) 
             VALUES ($1, $2, $3, $4) 
@@ -220,7 +207,6 @@ func (r *BoardRepo) UpdateBoard(ctx context.Context, boardID string, userID int,
 			return fmt.Errorf("%w: failed to insert column %s: %v", ErrBoardUpdateFailed, col.ID, err)
 		}
 
-		// 🔑 Вставка карточек
 		for j, card := range col.Cards {
 			_, err = tx.ExecContext(ctx, `
                 INSERT INTO cards (id, column_id, content, position) 
@@ -233,10 +219,42 @@ func (r *BoardRepo) UpdateBoard(ctx context.Context, boardID string, userID int,
 		}
 	}
 
-	// 4. Коммит
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("transaction commit failed: %w", err)
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("transaction commit failed: %w", commitErr)
 	}
 
 	return nil
+}
+
+func (r *BoardRepo) GetBoardOwnerID(ctx context.Context, boardID string) (int, error) {
+	var ownerID int
+	query := `SELECT user_id FROM boards WHERE id = $1`
+
+	err := r.DB.GetContext(ctx, &ownerID, query, boardID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrBoardNotFound
+		}
+		return 0, fmt.Errorf("failed to get board owner ID: %w", err)
+	}
+	return ownerID, nil
+}
+
+func (r *BoardRepo) GetBoardOwnerIDByColumnID(ctx context.Context, columnID string) (int, error) {
+	var ownerID int
+	query := `
+        SELECT b.user_id 
+        FROM boards b 
+        JOIN columns c ON b.id = c.board_id 
+        WHERE c.id = $1;
+    `
+		
+	err := r.DB.GetContext(ctx, &ownerID, query, columnID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrBoardNotFound
+		}
+		return 0, fmt.Errorf("failed to get board owner ID by column ID: %w", err)
+	}
+	return ownerID, nil
 }

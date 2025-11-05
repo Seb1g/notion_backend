@@ -13,102 +13,106 @@ import (
 )
 
 type CardHandler struct {
-	Service     *trello_services.CardService
-	AuthService *auth_services.AuthService
+  Service     *trello_services.CardService
+  AuthService *auth_services.AuthService
+  BoardRepo   middlewares.BoardRepoInterface 
 }
 
-func NewCardHandler(s *trello_services.CardService, a *auth_services.AuthService) *CardHandler {
-	return &CardHandler{Service: s, AuthService: a}
+func NewCardHandler(s *trello_services.CardService, a *auth_services.AuthService, br middlewares.BoardRepoInterface) *CardHandler {
+  return &CardHandler{Service: s, AuthService: a, BoardRepo: br}
 }
 
 func (h *CardHandler) CardRoutes(r *mux.Router) {
-	// Create card in column: Status: WORK
-	r.Handle("/api/v1/trello/create_card",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.createCard)),
-	).Methods("POST")
-	// Delete card in column: Status: WORK
-	r.Handle("/api/v1/trello/delete_card",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.deleteCard)),
-	).Methods("DELETE")
-	// Update card in column: Status: WORK
-	r.Handle("/api/v1/trello/rename_card",
-		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.renameCard)),
-	).Methods("PUT")
+  boardRepo := h.BoardRepo
+
+  r.Handle("/api/v1/trello/column/{columnID}/card",
+    middlewares.AuthMiddleware(h.AuthService,
+      middlewares.IsBoardOwner_ColumnPath(boardRepo, http.HandlerFunc(h.createCard))),
+  ).Methods("POST")
+  
+  cardRouter := r.PathPrefix("/api/v1/trello/column/{columnID}/card/{cardID}").Subrouter()
+  
+  cardRouter.Handle("",
+    middlewares.AuthMiddleware(h.AuthService,
+      middlewares.IsBoardOwner_ColumnPath(boardRepo, http.HandlerFunc(h.deleteCard))),
+  ).Methods("DELETE")
+  
+  cardRouter.Handle("",
+    middlewares.AuthMiddleware(h.AuthService,
+      middlewares.IsBoardOwner_ColumnPath(boardRepo, http.HandlerFunc(h.renameCard))),
+  ).Methods("PUT")
 }
 
 func (h *CardHandler) createCard(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ColumnID  string `json:"column_id"`
-		CardTitle string `json:"card_title"`
-	}
+  vars := mux.Vars(r)
+  columnID := vars["columnID"]
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handleError(w, err)
-		return
-	}
-	defer r.Body.Close()
+  var req struct {
+    CardTitle string `json:"card_title"`
+  }
 
-	cardData, err := h.Service.CreateCard(r.Context(), req.ColumnID, req.CardTitle)
-	if err != nil {
-		handleError(w, err)
-		return
-	}
+  if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+    handleError(w, err)
+    return
+  }
+  defer r.Body.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cardData)
+  cardData, err := h.Service.CreateCard(r.Context(), columnID, req.CardTitle)
+  if err != nil {
+    handleError(w, err)
+    return
+  }
+
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(cardData)
 }
 
 func (h *CardHandler) deleteCard(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ColumnID string `json:"column_id"`
-		CardID   string `json:"card_id"`
-	}
+  vars := mux.Vars(r)
+  columnID := vars["columnID"]
+  cardID := vars["cardID"]
+  
+  err := h.Service.DeleteCard(r.Context(), columnID, cardID)
+  if err != nil {
+    if errors.Is(err, trello_repository.ErrCardNotFound) {
+      w.WriteHeader(http.StatusNotFound)
+      json.NewEncoder(w).Encode(map[string]string{"message": "Card not found"})
+      return
+    }
+    handleError(w, err)
+    return
+  }
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handleError(w, err)
-		return
-	}
-	defer r.Body.Close()
-
-	err := h.Service.DeleteCard(r.Context(), req.ColumnID, req.CardID)
-	if err != nil {
-		if errors.Is(err, trello_repository.ErrCardNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Card not found"})
-			return
-		}
-		handleError(w, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Card deleted successfully"})
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(map[string]string{"message": "Card deleted successfully"})
 }
 
 func (h *CardHandler) renameCard(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ColumnID string `json:"column_id"`
-		CardID   string `json:"card_id"`
-		NewName  string `json:"new_name"`
-	}
+  vars := mux.Vars(r)
+  columnID := vars["columnID"]
+  cardID := vars["cardID"]
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		handleError(w, err)
-		return
-	}
-	defer r.Body.Close()
+  var req struct {
+    NewName string `json:"new_name"`
+  }
 
-	card, err := h.Service.RenameCard(r.Context(), req.ColumnID, req.CardID, req.NewName)
-	if err != nil {
-		if errors.Is(err, trello_repository.ErrCardNotFound) {
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Card not found"})
-			return
-		}
-		handleError(w, err)
-		return
-	}
+  if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+    handleError(w, err)
+    return
+  }
+  defer r.Body.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"message": "Card success renamed", "card": card})
+  card, err := h.Service.RenameCard(r.Context(), columnID, cardID, req.NewName)
+  if err != nil {
+    if errors.Is(err, trello_repository.ErrCardNotFound) {
+      w.WriteHeader(http.StatusNotFound)
+      json.NewEncoder(w).Encode(map[string]string{"message": "Card not found"})
+      return
+    }
+    handleError(w, err)
+    return
+  }
+
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(map[string]any{"message": "Card success renamed", "card": card})
 }

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-
-	"anemone_notes/internal/api"
 	"anemone_notes/internal/api/middlewares"
 	"anemone_notes/internal/services/auth_services"
 	"anemone_notes/internal/services/notes_services"
@@ -39,10 +37,6 @@ func (h *FolderHandler) FolderRoutes(r *mux.Router) {
 	r.Handle("/api/v1/folder/delete/{id}",
 		middlewares.AuthMiddleware(h.AuthService, http.HandlerFunc(h.deleteFolder)),
 	).Methods("DELETE")
-	// TODO: DELETE THIS ENDPOINT
-	r.HandleFunc("/api/v1/folder/health",
-		api.HealthCheckHandler,
-	).Methods("GET")
 }
 
 func (h *FolderHandler) createFolder(w http.ResponseWriter, r *http.Request) {

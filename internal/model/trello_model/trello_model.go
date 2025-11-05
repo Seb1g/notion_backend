@@ -37,3 +37,7 @@ type DefaultColumnData struct {
 	Title string
 	Cards []string
 }
+
+type ContextKey string
+
+const UserIDKey ContextKey = "userID"
