@@ -44,6 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_pages_user_id ON pages (user_id);
 -- Таблица для хранения сгенерированных временных адресов
 CREATE TABLE temp_addresses (
     id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     address VARCHAR(255) UNIQUE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ

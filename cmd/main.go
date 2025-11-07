@@ -16,7 +16,6 @@ import (
 	"anemone_notes/internal/services/notes_services"
 	"anemone_notes/internal/services/trello_services"
 	"anemone_notes/internal/smtp_server"
-	"anemone_notes/internal/utils"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 	"log"
@@ -28,8 +27,8 @@ func setupCORS(router http.Handler) http.Handler {
 	cfg := config.Load()
 
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{cfg.CorsDev}, // FOR DEV
-		// AllowedOrigins: []string{cfg.CorsProd}, // FOR PROD
+		// AllowedOrigins: []string{cfg.CorsDev}, // FOR DEV
+		AllowedOrigins: []string{cfg.CorsProd}, // FOR PROD
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -49,7 +48,6 @@ func main() {
 	defer db.Close()
 	log.Println("INFO: Database connection successful")
 
-	jwtManager := utils.NewJWTManager(cfg.JWTSecret)
 
 	// AUTH
 	userRepo := auth_repository.NewUserRepo(db)
@@ -69,8 +67,8 @@ func main() {
 
 	// ANEMONE MAIL SERVICE
 	mailRepo := mail_repository.New(db)
-	mailService := mail_services.New(mailRepo, jwtManager, cfg.DomainName)
-	mailHandler := mail_api.NewMailHandler(mailService, jwtManager)
+	mailService := mail_services.New(mailRepo, cfg.DomainName)
+	mailHandler := mail_api.NewMailHandler(mailService, authSvc, mailRepo)
 
 	// TRELLO BOARD
 	boardRepo := trello_repository.NewBoardRepo(db)

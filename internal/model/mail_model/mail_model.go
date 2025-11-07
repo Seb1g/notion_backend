@@ -6,7 +6,8 @@ import (
 )
 
 type TempAddress struct {
-	ID        int       `db:"id" json:"-"`
+	ID        int       `db:"id" json:"id"`
+	UserID    int       `json:"-" db:"user_id"`
 	Address   string    `db:"address" json:"address"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
